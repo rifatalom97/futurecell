@@ -29,10 +29,12 @@ use App\Models\Color;
 use App\Models\ColorMeta;
 use App\Models\Size;
 use App\Models\ProductDeliveryOptions;
+use App\Models\ProductCategory;
 use App\Models\Country;
 use App\Models\CountryMeta;
 use App\Models\Subscribers;
 use Session;
+use Str;
 class ExcelImportExportController extends Controller
 {
     public function importExportExcel(){
@@ -154,6 +156,17 @@ class ExcelImportExportController extends Controller
                 $model = DB::table('model')->where('id',$product->model)->first();
                 $brand = DB::table('brand_meta')->where('brand_id',$product->brand)->first();
 
+                $product_categories = ProductCategory::with(['category'=>function($join){
+                                        $join->with(['meta']);
+                                    }])->where('product_id',$product->id)->get();
+                $filter_category  = '';
+                if(count($product_categories)){
+                    foreach($product_categories as $pdc){
+                        $filter_category .= $pdc->category->meta->title . ', ';
+                    }
+                    $filter_category = rtrim($filter_category, ', ');
+                }
+
                 $filterd_gallery = '';
                 if( $product->gallery ){
                     $gl = json_decode($product->gallery);
@@ -178,6 +191,7 @@ class ExcelImportExportController extends Controller
                     'price'             => $product->price,
                     'regular_price'     => $product->regular_price,
                     'quantity'          => $product->quantity,
+                    'category'          => $filter_category,
                     'brand'             => ($brand?$brand->title:''),
                     'model'             => ($model?$model->model:''),
                     'thumbnail'         => $product->thumbnail,
@@ -340,7 +354,7 @@ class ExcelImportExportController extends Controller
         $spreadsheet    = $reader->load( $destinationPath . '/' . $newName );
         $getRow         = $spreadsheet->getActiveSheet()->toArray();
 
-        $this->filter_and_push( $getRow, $table );
+        return $this->filter_and_push( $getRow, $table );
     }
 
     private function filter_and_push( $getRow, $table ){
@@ -379,7 +393,7 @@ class ExcelImportExportController extends Controller
         
         if(count($data)){
             $importTable = 'import'.ucfirst($table);
-            $this->$importTable( $data );
+            return $this->$importTable( $data );
         }else{
             Session::flash('message', 'Data filter error');
             return redirect()->back();
@@ -429,9 +443,9 @@ class ExcelImportExportController extends Controller
     protected function importUsers($data){
         if($data){
             foreach($data as $userData){
-                $id         = $userData['id'];
-                $points     = $userData['points'];
-                $balance    = $userData['balance'];
+                $id         = (int)$userData['id'];
+                $points     = (int)$userData['points'];
+                $balance    = (int)$userData['balance'];
 
                 // Unset key data which is not need to pass on query
                 $userData = $this->unsetInputedData(
@@ -440,7 +454,7 @@ class ExcelImportExportController extends Controller
                             );
 
                 $user = User::updateOrCreate(
-                            ['id'=>$id],
+                            ['email'=>$userData['email']],
                             $userData
                         );
                 if( $id && $user){
@@ -460,71 +474,160 @@ class ExcelImportExportController extends Controller
                 UserBillingAddress::create(['user_id'=>$id]);
                 UserShippingAddress::create(['user_id'=>$id]);
             }
-            $msg = 'Success! Users uploaded successfully';
         }
-        Session::flash('message', ($msg?:'OOPs! Something went wrong'));
-        return redirect('manager/import-export');
+        Session::flash('message', 'Success! Users uploaded successfully');
+        return redirect('/manager/import-export');
     }
     protected function importProducts($data){
+
         if($data){
             foreach($data as $product){
-                $id                 = $product['id'];
-                $title              = $product['title'];
-                $shortDescription   = isset($product['shortDescription'])?$product['shortDescription']:"[]";
-                $description        = isset($product['description'])?$product['description']:"[]";
-
-                $filterdTitle               = $this->getLangSplitedTexts($title);
-                $filterdShortDescription    = $this->getLangSplitedTexts($shortDescription);
-                $filterdDescription         = $this->getLangSplitedTexts($description);
-                
-                $categories = $this->getExplodedIds($product['categories']);
-                $sizes      = $this->getExplodedIds($product['sizes']);
-                $colors     = $this->getExplodedIds($product['colors']);
+                $id                     = (int)$product['id'];
+                $title                  = $product['title'];
+                $short_description      = isset($product['short_description'])?$product['short_description']:"";
+                $description            = isset($product['description'])?$product['description']:"";
+                $category               = isset($product['category'])?$product['category']:"";
 
                 // Unset key data which is not need to pass on query
-                $product = $this->unsetInputedData($product,array('title','categories','sizes','colors'));
-
+                $product = $this->unsetInputedData($product,array('title','short_description','description','category','brand','model','gallery'));
+                $product['regular_price'] = (double)$product['regular_price'];
                 $updatedProduct = Product::updateOrCreate(
                     ['id'=>$id],
                     $product
                 );
-                if( $id && $updatedProduct){
+
+
+                if( $updatedProduct){
                     $id = $updatedProduct->id;
                 }
 
-                // balance and points
-                ProductRelationController::insertUpdateRelations(
-                    $id,
-                    array(
-                        'product_category'      => $categories,
-                        'product_size'          => $sizes,
-                        'product_color'         => $colors,
-                    )
-                );
-                // end balance and points
+                // category
+                $categories = explode(',',$category);
+                if(count($categories)){
+                    $filterd_category_ids = [];
+                    foreach($categories as $item){
+                        $ct = trim($item);
+                        if($ct){
+                            $catMeta = CategoryMeta::where('title',$ct)->first();
+                            if($catMeta){
+                                $filterd_category_ids[] = $catMeta->category_id;
+                            }else{
+                                $category = Category::create(
+                                    [
+                                        'slug'      => Str::slug($ct),
+                                        'image'     => NULL,
+                                        'status'    => 1
+                                    ]
+                                );
+                                if($category->id){
+                                    CategoryMeta::create([
+                                        'category_id'   => $category->id,
+                                        'title'         => $ct,
+                                        'lang'          => app()->getLocale()
+                                    ]);
+                                    $filterd_category_ids[] = $category->id;
+                                }
+                            }
+                        }
+                    }
+                }
 
-                // User Billing address and shipping
-                ProductMeta::where('product_id',$id)->delete();
+                // Brand
+                $brand_id = NULL;
+                if(isset($product['brand'])&&$product['brand']){
+                    $br_title   = trim($product['brand']);
+                    $slug       = Str::slug( $br_title );
+                    $brm        = BrandMeta::where('title',$br_title)->first();
+                    if($brm){
+                        $brand_id = $brm->id;
+                    }else{
+                        $brand = Brand::updateOrCreate(
+                            [
+                                'slug'=>$slug
+                            ],
+                            [
+                                'slug'      => $slug,
+                                'image'     => NULL,
+                                'status'    => 1
+                            ]
+                        );
+                        if($brand->id){
+                            BrandMeta::create([
+                                'brand_id'  => $brand->id,
+                                'title'     => $br_title,
+                                'lang'     => app()->getLocale(),
+                            ]);
+                        }
+                    }
+                }
+                // model
+                $model_id = NULL;
+                if(isset($product['model'])&&$product['model']){
+                    $model  = trim($product['model']);
+                    $m      = Models::where('model',$model)->first();
+                    if($m){
+                        $model_id = $m->id;
+                    }else{
+                        $model = Models::create([
+                            'model'     => $model,
+                            'brand_id'  => (int)$brand_id,
+                            'status'    => 1
+                        ]);
+                        $model_id = $model->id;
+                    }
+                }
 
-
+                // Gallery
+                $gallery = [];
+                if(isset($product['gallery']) && $product['gallery']){
+                    $gls = explode(',', $product['gallery']);
+                    if(count($gls)){
+                        foreach($gls as $gl){
+                            if($gl){
+                                $gallery[] = array(
+                                    'image' => $gl,
+                                    'old_image' => $gl,
+                                );
+                            }
+                        }
+                    }
+                    $gallery = json_encode($gallery);
+                }
+                Product::where('id',$id)->update([
+                    'brand' => $brand_id,
+                    'model' => $model_id,
+                    'gallery' => $gallery
+                ]);
                 
 
-                $lang_count = count($filterdTitle);
-                if($lang_count){
-                    foreach($filterdTitle as $key => $val){
-                        ProductMeta::create([
-                            'product_id'        => $id,
-                            'title'             => $val,
-                            'shortDescription'  => isset($filterdShortDescription[$key])?$filterdShortDescription[$key]:'',
-                            'description'       => isset($filterdDescription[$key])?$filterdDescription[$key]:'',
-                            'lang'              => $key,
+                // Product meta
+                if($id){
+                    $meta = ProductMeta::updateOrCreate([
+                        'product_id' => $id,
+                        'lang' => app()->getLocale()
+                    ],[
+                        'product_id'        => $id,
+                        'title'             => $title,
+                        'short_description'  => $short_description,
+                        'description'       => $description,
+                        'lang'              => app()->getLocale(),
+                    ]);
+                    
+                }
+
+                // Category
+                if(count($filterd_category_ids)){ 
+                    foreach($filterd_category_ids as $cat_id){
+                        ProductCategory::create([
+                            'product_id' => $id,
+                            'category_id' => $cat_id
                         ]);
                     }
                 }
             }
-            return response()->json(['result'=>200]);
         }
-        return response()->json(['result'=>500]);
+        Session::flash('message','Products uploaded successfully');
+        return redirect('manager/import-export');
     }
     
     protected function importCoupons($data){

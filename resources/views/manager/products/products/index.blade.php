@@ -56,9 +56,10 @@
                     <tbody>
                         @if(isset($products)&&count($products))
                             @foreach($products as $product)
+                                @php($title = $product->meta?$product->meta->title:'' )
                                 <tr id="product_{{ $product->id }}">
                                     <td><input type="checkbox" name="products" value="{{ $product->id }}"></td>
-                                    <td>{{ $product->meta->title }}</td>
+                                    <td>{{ $title }}</td>
                                     <td>{{ $product->model_number }}</td>
                                     <td>{{ $product->barcode }}</td>
                                     <td>{{ $product->quantity }}</td>
@@ -67,13 +68,13 @@
                                     <td>{{ date('d F, Y', strtotime($product->created_at)) }}</td>
                                     <td class="text-center action_buttons">
                                         <a href="{{ url('/store/'.$product->slug) }}" target="_blank">
-                                            <img class="ml-3 mr-3" src="{{ asset('/assets/admin/img/view_icon.svg') }}" alt="View" title="View {{ $product->meta->title }}">
+                                            <img class="ml-3 mr-3" src="{{ asset('/assets/admin/img/view_icon.svg') }}" alt="View" title="View {{ $title }}">
                                         </a>
                                         <a href="{{ url('/manager/products/'.$product->id) }}">
-                                            <img class="ml-3 mr-3" src="{{ asset('/assets/admin/img/edit_icon.svg') }}" alt="edit" title="Edit {{ $product->meta->title }}">
+                                            <img class="ml-3 mr-3" src="{{ asset('/assets/admin/img/edit_icon.svg') }}" alt="edit" title="Edit {{ $title }}">
                                         </a>
                                         <a href="{{ url('/manager/products/delete/'.$product->id) }}">
-                                            <img class="ml-3 mr-3" src="{{ asset('/assets/admin/img/delete_icon.svg') }}" alt="delete" title="Delete {{ $product->meta->title }}">
+                                            <img class="ml-3 mr-3" src="{{ asset('/assets/admin/img/delete_icon.svg') }}" alt="delete" title="Delete {{ $title }}">
                                         </a>
                                     </td>
                                 </tr>
