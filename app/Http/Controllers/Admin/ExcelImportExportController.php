@@ -487,6 +487,9 @@ class ExcelImportExportController extends Controller
                 $short_description      = isset($product['short_description'])?$product['short_description']:"";
                 $description            = isset($product['description'])?$product['description']:"";
                 $category               = isset($product['category'])?$product['category']:"";
+                $brand                  = isset($product['brand'])?$product['brand']:"";
+                $model                  = isset($product['model'])?$product['model']:"";
+                $gallery                = isset($product['gallery'])?$product['gallery']:"";
 
                 // Unset key data which is not need to pass on query
                 $product = $this->unsetInputedData($product,array('title','short_description','description','category','brand','model','gallery'));
